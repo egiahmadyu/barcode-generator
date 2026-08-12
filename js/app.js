@@ -662,6 +662,8 @@
   let html5QrCode = null;
   let scanEngine = null;
   let scanStartPending = false;
+  let scanMirrorObserver = null;
+  let scanMirrorInterval = null;
 
   function switchTab(tabId) {
     if (tabId !== "tab-scan" && isScanning) {
@@ -972,11 +974,42 @@
     scanViewport.innerHTML = '<div class="scan-placeholder">📷 Kamera live</div>';
   }
 
-  function enableScanMirror() {
+  function applyScanMirrorStyles() {
     scanViewport.classList.add("mirror-live");
   }
 
-  function disableScanMirror() {
+  function startScanMirrorWatch() {
+    stopScanMirrorWatch();
+    applyScanMirrorStyles();
+
+    scanMirrorObserver = new MutationObserver(function () {
+      applyScanMirrorStyles();
+    });
+    scanMirrorObserver.observe(scanViewport, {
+      childList: true,
+      subtree: true,
+    });
+
+    let ticks = 0;
+    scanMirrorInterval = setInterval(function () {
+      applyScanMirrorStyles();
+      ticks += 1;
+      if (ticks >= 15) {
+        clearInterval(scanMirrorInterval);
+        scanMirrorInterval = null;
+      }
+    }, 200);
+  }
+
+  function stopScanMirrorWatch() {
+    if (scanMirrorObserver) {
+      scanMirrorObserver.disconnect();
+      scanMirrorObserver = null;
+    }
+    if (scanMirrorInterval) {
+      clearInterval(scanMirrorInterval);
+      scanMirrorInterval = null;
+    }
     scanViewport.classList.remove("mirror-live");
   }
 
@@ -1051,7 +1084,7 @@
     };
 
     await html5QrCode.start(cameraId, config, handleScanSuccess, function () {});
-    enableScanMirror();
+    startScanMirrorWatch();
     scanEngine = "html5";
   }
 
@@ -1218,7 +1251,6 @@
       if (typeof Html5Qrcode !== "undefined") {
         await startHtml5LiveScanner();
         isScanning = true;
-        enableScanMirror();
         setScanButtonState(true);
         scanStartPending = false;
         return;
@@ -1245,12 +1277,12 @@
       }
 
       isScanning = true;
-      enableScanMirror();
+      startScanMirrorWatch();
       setScanButtonState(true);
     } catch (error) {
       stopScanStream();
       stopZxingReader();
-      disableScanMirror();
+      stopScanMirrorWatch();
       showScanPlaceholder();
       isScanning = false;
       setScanButtonState(false);
@@ -1265,7 +1297,7 @@
     stopScanStream();
     stopZxingReader();
     await stopHtml5Scanner();
-    disableScanMirror();
+    stopScanMirrorWatch();
     showScanPlaceholder();
     isScanning = false;
     scanEngine = null;

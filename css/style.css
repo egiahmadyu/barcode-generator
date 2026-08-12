@@ -107,12 +107,14 @@ body {
   position: relative;
 }
 
-.scan-viewport.mirror-live {
-  transform: scaleX(-1);
+.scan-viewport.mirror-live > div:not(.scan-placeholder) {
+  transform: scaleX(-1) !important;
+  -webkit-transform: scaleX(-1) !important;
 }
 
-.scan-viewport.mirror-live video {
-  transform: none;
+.scan-viewport.mirror-live > video {
+  transform: scaleX(-1) !important;
+  -webkit-transform: scaleX(-1) !important;
 }
 
 .scan-viewport video {
