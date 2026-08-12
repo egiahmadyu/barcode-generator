@@ -708,6 +708,65 @@ input:focus {
   to { transform: rotate(360deg); }
 }
 
+.scan-popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+}
+
+.scan-popup-card {
+  width: 100%;
+  max-width: 320px;
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 28px 24px 24px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+  animation: popIn 0.25s ease;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.scan-popup-icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+}
+
+.scan-popup-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--success);
+}
+
+.scan-popup-code {
+  font-family: "Courier New", monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  padding: 14px 12px;
+  background: var(--success-bg);
+  border: 1.5px solid #6ee7b7;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.scan-popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .toast {
   position: fixed;
   bottom: calc(var(--bottom-nav-h) + var(--bottom-bar-h) + var(--safe-bottom) + 12px);

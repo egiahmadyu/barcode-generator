@@ -641,6 +641,10 @@
   const scanCopyBtn = document.getElementById("scanCopyBtn");
   const scanHistoryList = document.getElementById("scanHistoryList");
   const scanClearHistoryBtn = document.getElementById("scanClearHistoryBtn");
+  const scanPopup = document.getElementById("scanPopup");
+  const scanPopupCode = document.getElementById("scanPopupCode");
+  const scanPopupCopyBtn = document.getElementById("scanPopupCopyBtn");
+  const scanPopupOkBtn = document.getElementById("scanPopupOkBtn");
 
   let selectedFile = null;
   let downloadUrl = null;
@@ -914,6 +918,15 @@
     showToast("Salin manual: " + code, false);
   }
 
+  function showScanPopup(code) {
+    scanPopupCode.textContent = code;
+    scanPopup.classList.remove("hidden");
+  }
+
+  function hideScanPopup() {
+    scanPopup.classList.add("hidden");
+  }
+
   function handleScanSuccess(decodedText) {
     const code = String(decodedText).trim().toUpperCase();
     if (!code) return;
@@ -933,7 +946,7 @@
     }
 
     if (navigator.vibrate) navigator.vibrate(80);
-    showToast("Terbaca: " + code, false);
+    showScanPopup(code);
   }
 
   function setScanButtonState(active) {
@@ -1328,6 +1341,16 @@
 
   scanCopyBtn.addEventListener("click", function () {
     copyScanCode(scanResultCode.textContent || "");
+  });
+
+  scanPopupOkBtn.addEventListener("click", hideScanPopup);
+
+  scanPopupCopyBtn.addEventListener("click", function () {
+    copyScanCode(scanPopupCode.textContent || "");
+  });
+
+  scanPopup.addEventListener("click", function (event) {
+    if (event.target === scanPopup) hideScanPopup();
   });
 
   scanClearHistoryBtn.addEventListener("click", function () {
