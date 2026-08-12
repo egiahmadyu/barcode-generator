@@ -12,9 +12,10 @@
     ROWS: 4,
     LABELS_PER_PAGE: 12,
     LABEL_WIDTH_MM: 64,
-    LABEL_HEIGHT_MM: 32,
+    LABEL_HEIGHT_MM: 31.8,
     DEFAULT_MARGIN_TOP_MM: 9,
-    DEFAULT_COLUMN_LEFT_MM: [3, 66.5, 130],
+    DEFAULT_MARGIN_LEFT_MM: 3,
+    DEFAULT_HORIZONTAL_PITCH_MM: 65.5,
     DEFAULT_VERTICAL_PITCH_MM: 38,
     FOOTER_HEIGHT_MM: 7.5,
     FOOTER_FONT_MM: 2,
@@ -380,7 +381,7 @@
       ctx,
       footerStyle.text,
       width,
-      topHeight,
+      height - footerHeight,
       footerHeight,
       footerStyle.bgColor,
       footerStyle.textColor
@@ -428,21 +429,16 @@
 
   function getSheetLayout() {
     const marginTop = parseFloat(document.getElementById("calMarginTop").value);
-    const col1 = parseFloat(document.getElementById("calCol1").value);
-    const col2 = parseFloat(document.getElementById("calCol2").value);
-    const col3 = parseFloat(document.getElementById("calCol3").value);
+    const marginLeft = parseFloat(document.getElementById("calMarginLeft").value);
+    const horizontalPitch = parseFloat(document.getElementById("calPitchH").value);
     const verticalPitch = parseFloat(document.getElementById("calPitchV").value);
-    const defaultCols = LABEL_CONFIG.DEFAULT_COLUMN_LEFT_MM;
 
     return {
       pageWidthMm: LABEL_CONFIG.PAGE_WIDTH_MM,
       pageHeightMm: LABEL_CONFIG.PAGE_HEIGHT_MM,
       marginTopMm: isNaN(marginTop) ? LABEL_CONFIG.DEFAULT_MARGIN_TOP_MM : marginTop,
-      columnLeftMm: [
-        isNaN(col1) ? defaultCols[0] : col1,
-        isNaN(col2) ? defaultCols[1] : col2,
-        isNaN(col3) ? defaultCols[2] : col3,
-      ],
+      marginLeftMm: isNaN(marginLeft) ? LABEL_CONFIG.DEFAULT_MARGIN_LEFT_MM : marginLeft,
+      horizontalPitchMm: isNaN(horizontalPitch) ? LABEL_CONFIG.DEFAULT_HORIZONTAL_PITCH_MM : horizontalPitch,
       verticalPitchMm: isNaN(verticalPitch) ? LABEL_CONFIG.DEFAULT_VERTICAL_PITCH_MM : verticalPitch,
       labelWidthMm: LABEL_CONFIG.LABEL_WIDTH_MM,
       labelHeightMm: LABEL_CONFIG.LABEL_HEIGHT_MM,
@@ -456,11 +452,10 @@
     const pageHeight = mmToPx(sheetLayout.pageHeightMm);
     const labelWidth = mmToPx(sheetLayout.labelWidthMm);
     const labelHeight = mmToPx(sheetLayout.labelHeightMm);
+    const marginLeft = mmToPx(sheetLayout.marginLeftMm);
     const marginTop = mmToPx(sheetLayout.marginTopMm);
+    const horizontalPitch = mmToPx(sheetLayout.horizontalPitchMm);
     const verticalPitch = mmToPx(sheetLayout.verticalPitchMm);
-    const columnLeft = sheetLayout.columnLeftMm.map(function (mm) {
-      return mmToPx(mm);
-    });
 
     const canvas = document.createElement("canvas");
     canvas.width = pageWidth;
@@ -478,7 +473,7 @@
         const labelImg = labelImageCache.get(product.barcode);
         if (!labelImg) continue;
 
-        const x = columnLeft[colIndex];
+        const x = marginLeft + colIndex * horizontalPitch;
         const y = marginTop + rowIndex * verticalPitch;
         ctx.drawImage(labelImg, x, y, labelWidth, labelHeight);
       }
