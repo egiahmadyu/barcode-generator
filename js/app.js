@@ -964,6 +964,14 @@
     scanViewport.innerHTML = '<div class="scan-placeholder">📷 Kamera live</div>';
   }
 
+  function enableScanMirror() {
+    scanViewport.classList.add("mirror-live");
+  }
+
+  function disableScanMirror() {
+    scanViewport.classList.remove("mirror-live");
+  }
+
   async function stopHtml5Scanner() {
     if (!html5QrCode) return;
 
@@ -1023,6 +1031,7 @@
         };
       },
       formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
+      disableFlip: true,
       experimentalFeatures: {
         useBarCodeDetectorIfSupported: true,
       },
@@ -1034,6 +1043,7 @@
     };
 
     await html5QrCode.start(cameraId, config, handleScanSuccess, function () {});
+    enableScanMirror();
     scanEngine = "html5";
   }
 
@@ -1200,6 +1210,7 @@
       if (typeof Html5Qrcode !== "undefined") {
         await startHtml5LiveScanner();
         isScanning = true;
+        enableScanMirror();
         setScanButtonState(true);
         scanStartPending = false;
         return;
@@ -1226,10 +1237,12 @@
       }
 
       isScanning = true;
+      enableScanMirror();
       setScanButtonState(true);
     } catch (error) {
       stopScanStream();
       stopZxingReader();
+      disableScanMirror();
       showScanPlaceholder();
       isScanning = false;
       setScanButtonState(false);
@@ -1244,6 +1257,7 @@
     stopScanStream();
     stopZxingReader();
     await stopHtml5Scanner();
+    disableScanMirror();
     showScanPlaceholder();
     isScanning = false;
     scanEngine = null;

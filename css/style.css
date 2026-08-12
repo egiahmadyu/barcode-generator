@@ -107,13 +107,20 @@ body {
   position: relative;
 }
 
+.scan-viewport.mirror-live {
+  transform: scaleX(-1);
+}
+
+.scan-viewport.mirror-live video {
+  transform: none;
+}
+
 .scan-viewport video {
   width: 100% !important;
   height: 100% !important;
   min-height: 280px;
   object-fit: cover;
   display: block;
-  transform: scaleX(-1);
 }
 
 .scan-viewport > div {
