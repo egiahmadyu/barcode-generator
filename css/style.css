@@ -99,7 +99,7 @@ body {
 
 .scan-viewport {
   width: 100%;
-  min-height: 260px;
+  min-height: 280px;
   border-radius: 14px;
   overflow: hidden;
   background: #0f172a;
@@ -108,12 +108,34 @@ body {
 }
 
 .scan-viewport video {
-  width: 100%;
-  height: 100%;
-  min-height: 260px;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 280px;
   object-fit: cover;
   display: block;
   transform: scaleX(-1);
+}
+
+.scan-viewport > div {
+  width: 100% !important;
+  min-height: 280px;
+}
+
+.scan-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.95rem;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.card-scan-live .scan-status {
+  margin: 0 0 10px;
 }
 
 .scan-status {
@@ -123,8 +145,40 @@ body {
   text-align: center;
 }
 
-#scanPhotoBtn {
-  margin-top: 8px;
+.scan-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.scan-divider::before,
+.scan-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.scan-help {
+  margin-top: 12px;
+  font-size: 0.85rem;
+}
+
+.scan-help summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.scan-help .steps-list {
+  margin-top: 10px;
+}
+
+#scanToggleBtn {
+  margin-top: 0;
 }
 
 .scan-result-code {
@@ -389,6 +443,11 @@ input:focus {
 
 .calibration[open] summary {
   margin-bottom: 12px;
+}
+
+.calibration-hint {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
 }
 
 .drop-zone {

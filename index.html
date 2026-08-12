@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#1d4ed8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta http-equiv="Permissions-Policy" content="camera=(self)">
   <title>Barcode Label</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -109,18 +110,23 @@
               <input type="number" id="calMarginTop" value="9" step="0.1">
             </div>
             <div>
-              <label for="calMarginLeft" class="sub-label">Margin kiri</label>
-              <input type="number" id="calMarginLeft" value="3" step="0.1">
-            </div>
-            <div>
-              <label for="calPitchH" class="sub-label">Pitch H</label>
-              <input type="number" id="calPitchH" value="65.2" step="0.1">
-            </div>
-            <div>
               <label for="calPitchV" class="sub-label">Pitch V</label>
               <input type="number" id="calPitchV" value="38" step="0.1">
             </div>
+            <div>
+              <label for="calCol1" class="sub-label">Kolom 1 — kiri (mm)</label>
+              <input type="number" id="calCol1" value="3" step="0.1">
+            </div>
+            <div>
+              <label for="calCol2" class="sub-label">Kolom 2 — kiri (mm)</label>
+              <input type="number" id="calCol2" value="66.5" step="0.1">
+            </div>
+            <div>
+              <label for="calCol3" class="sub-label">Kolom 3 — kiri (mm)</label>
+              <input type="number" id="calCol3" value="130" step="0.1">
+            </div>
           </div>
+          <p class="hint calibration-hint">Kolom 1 jangan diubah kalau sudah pas. Sesuaikan kolom 2 & 3 saja.</p>
         </details>
       </section>
 
@@ -158,13 +164,24 @@
       <section id="tab-scan" class="tab-panel">
         <div class="section-title">Scan Barcode</div>
 
-        <div class="card">
-          <p class="hint">Arahkan kamera ke barcode Code128 di label. Butuh izin kamera & HTTPS.</p>
-          <p id="scanStatus" class="scan-status">Tap Mulai Scan untuk buka kamera</p>
-          <div id="scanViewport" class="scan-viewport"></div>
-          <button type="button" id="scanToggleBtn" class="btn btn-primary btn-block">📷 Mulai Scan</button>
+        <div class="card card-scan-live">
+          <p id="scanStatus" class="scan-status">Membuka kamera...</p>
+          <div id="scanViewport" class="scan-viewport">
+            <div class="scan-placeholder">📷 Kamera live</div>
+          </div>
+          <button type="button" id="scanToggleBtn" class="btn btn-primary btn-block">🔄 Coba Lagi</button>
+
+          <details class="scan-help">
+            <summary>Kamera gagal? Buka di Safari/Chrome (bukan in-app browser)</summary>
+            <ul class="steps-list">
+              <li>iPhone: Safari → aA → Website Settings → Kamera → <strong>Allow</strong></li>
+              <li>Android: Chrome → gembok → Izinkan kamera</li>
+              <li>Harus HTTPS (GitHub Pages OK)</li>
+            </ul>
+          </details>
+
           <input type="file" id="scanPhotoInput" accept="image/*" capture="environment" hidden>
-          <button type="button" id="scanPhotoBtn" class="btn btn-outline btn-block">🖼 Scan dari Foto</button>
+          <button type="button" id="scanPhotoBtn" class="btn btn-ghost btn-block">🖼 Scan dari foto (cadangan)</button>
         </div>
 
         <div id="scanResultCard" class="card card-success hidden">
@@ -243,6 +260,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

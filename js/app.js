@@ -1,4 +1,4 @@
-/* global XLSX, JsBarcode, JSZip, saveAs, ZXing */
+/* global XLSX, JsBarcode, JSZip, saveAs, ZXing, Html5Qrcode, Html5QrcodeSupportedFormats */
 
 (function () {
   "use strict";
@@ -14,8 +14,7 @@
     LABEL_WIDTH_MM: 64,
     LABEL_HEIGHT_MM: 32,
     DEFAULT_MARGIN_TOP_MM: 9,
-    DEFAULT_MARGIN_LEFT_MM: 3,
-    DEFAULT_HORIZONTAL_PITCH_MM: 65.2,
+    DEFAULT_COLUMN_LEFT_MM: [3, 66.5, 130],
     DEFAULT_VERTICAL_PITCH_MM: 38,
     FOOTER_HEIGHT_MM: 7.5,
     FOOTER_FONT_MM: 2,
@@ -429,16 +428,21 @@
 
   function getSheetLayout() {
     const marginTop = parseFloat(document.getElementById("calMarginTop").value);
-    const marginLeft = parseFloat(document.getElementById("calMarginLeft").value);
-    const horizontalPitch = parseFloat(document.getElementById("calPitchH").value);
+    const col1 = parseFloat(document.getElementById("calCol1").value);
+    const col2 = parseFloat(document.getElementById("calCol2").value);
+    const col3 = parseFloat(document.getElementById("calCol3").value);
     const verticalPitch = parseFloat(document.getElementById("calPitchV").value);
+    const defaultCols = LABEL_CONFIG.DEFAULT_COLUMN_LEFT_MM;
 
     return {
       pageWidthMm: LABEL_CONFIG.PAGE_WIDTH_MM,
       pageHeightMm: LABEL_CONFIG.PAGE_HEIGHT_MM,
       marginTopMm: isNaN(marginTop) ? LABEL_CONFIG.DEFAULT_MARGIN_TOP_MM : marginTop,
-      marginLeftMm: isNaN(marginLeft) ? LABEL_CONFIG.DEFAULT_MARGIN_LEFT_MM : marginLeft,
-      horizontalPitchMm: isNaN(horizontalPitch) ? LABEL_CONFIG.DEFAULT_HORIZONTAL_PITCH_MM : horizontalPitch,
+      columnLeftMm: [
+        isNaN(col1) ? defaultCols[0] : col1,
+        isNaN(col2) ? defaultCols[1] : col2,
+        isNaN(col3) ? defaultCols[2] : col3,
+      ],
       verticalPitchMm: isNaN(verticalPitch) ? LABEL_CONFIG.DEFAULT_VERTICAL_PITCH_MM : verticalPitch,
       labelWidthMm: LABEL_CONFIG.LABEL_WIDTH_MM,
       labelHeightMm: LABEL_CONFIG.LABEL_HEIGHT_MM,
@@ -452,10 +456,11 @@
     const pageHeight = mmToPx(sheetLayout.pageHeightMm);
     const labelWidth = mmToPx(sheetLayout.labelWidthMm);
     const labelHeight = mmToPx(sheetLayout.labelHeightMm);
-    const marginLeft = mmToPx(sheetLayout.marginLeftMm);
     const marginTop = mmToPx(sheetLayout.marginTopMm);
-    const horizontalPitch = mmToPx(sheetLayout.horizontalPitchMm);
     const verticalPitch = mmToPx(sheetLayout.verticalPitchMm);
+    const columnLeft = sheetLayout.columnLeftMm.map(function (mm) {
+      return mmToPx(mm);
+    });
 
     const canvas = document.createElement("canvas");
     canvas.width = pageWidth;
@@ -473,7 +478,7 @@
         const labelImg = labelImageCache.get(product.barcode);
         if (!labelImg) continue;
 
-        const x = marginLeft + colIndex * horizontalPitch;
+        const x = columnLeft[colIndex];
         const y = marginTop + rowIndex * verticalPitch;
         ctx.drawImage(labelImg, x, y, labelWidth, labelHeight);
       }
@@ -655,10 +660,12 @@
   let scanVideo = null;
   let scanLoopId = null;
   let zxingReader = null;
+  let html5QrCode = null;
   let scanEngine = null;
+  let scanStartPending = false;
 
   function switchTab(tabId) {
-    if (isScanning && tabId !== "tab-scan") {
+    if (tabId !== "tab-scan" && isScanning) {
       stopScanner();
     }
 
@@ -672,6 +679,10 @@
     const hideGenerateBar = tabId === "tab-scan" || tabId === "tab-help";
     bottomBar.classList.toggle("hidden", hideGenerateBar);
     appMain.classList.toggle("no-bottom-bar", hideGenerateBar);
+
+    if (tabId === "tab-scan" && !isScanning && !scanStartPending) {
+      startLiveScanner();
+    }
   }
 
   navItems.forEach(function (item) {
@@ -931,22 +942,99 @@
   }
 
   function setScanButtonState(active) {
+    scanToggleBtn.classList.remove("hidden");
     if (active) {
-      scanToggleBtn.textContent = "⏹ Stop Scan";
+      scanToggleBtn.textContent = "⏹ Stop Kamera";
       scanToggleBtn.classList.remove("btn-primary");
       scanToggleBtn.classList.add("btn-danger");
       scanStatus.textContent = "Arahkan ke barcode Code128...";
       return;
     }
 
-    scanToggleBtn.textContent = "📷 Mulai Scan";
+    scanToggleBtn.textContent = "🔄 Coba Lagi";
     scanToggleBtn.classList.remove("btn-danger");
     scanToggleBtn.classList.add("btn-primary");
-    scanStatus.textContent = "Tap Mulai Scan untuk buka kamera";
   }
 
   function clearScanViewport() {
     scanViewport.innerHTML = "";
+  }
+
+  function showScanPlaceholder() {
+    scanViewport.innerHTML = '<div class="scan-placeholder">📷 Kamera live</div>';
+  }
+
+  async function stopHtml5Scanner() {
+    if (!html5QrCode) return;
+
+    try {
+      await html5QrCode.stop();
+    } catch (error) {
+      // ignore
+    }
+
+    try {
+      html5QrCode.clear();
+    } catch (error) {
+      // ignore
+    }
+
+    html5QrCode = null;
+  }
+
+  async function pickBackCameraId() {
+    if (typeof Html5Qrcode === "undefined" || !Html5Qrcode.getCameras) {
+      return { facingMode: "environment" };
+    }
+
+    try {
+      const cameras = await Html5Qrcode.getCameras();
+      if (!cameras || !cameras.length) {
+        return { facingMode: "environment" };
+      }
+
+      const backCamera = cameras.find(function (camera) {
+        return /back|rear|environment|belakang/i.test(camera.label);
+      });
+
+      if (backCamera) return backCamera.id;
+      if (cameras.length > 1) return cameras[cameras.length - 1].id;
+      return cameras[0].id;
+    } catch (error) {
+      return { facingMode: "environment" };
+    }
+  }
+
+  async function startHtml5LiveScanner() {
+    if (typeof Html5Qrcode === "undefined") {
+      throw new Error("Html5Qrcode tidak termuat");
+    }
+
+    clearScanViewport();
+    html5QrCode = new Html5Qrcode("scanViewport", { verbose: false });
+    const cameraId = await pickBackCameraId();
+
+    const config = {
+      fps: 12,
+      qrbox: function (viewfinderWidth, viewfinderHeight) {
+        return {
+          width: Math.min(Math.floor(viewfinderWidth * 0.92), 340),
+          height: Math.min(Math.floor(viewfinderHeight * 0.4), 150),
+        };
+      },
+      formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true,
+      },
+      videoConstraints: {
+        facingMode: "environment",
+        width: { min: 640, ideal: 1280 },
+        height: { min: 480, ideal: 720 },
+      },
+    };
+
+    await html5QrCode.start(cameraId, config, handleScanSuccess, function () {});
+    scanEngine = "html5";
   }
 
   function stopScanStream() {
@@ -976,178 +1064,248 @@
     }
   }
 
-  async function startNativeScanner() {
-    if (!("BarcodeDetector" in window)) {
-      throw new Error("BarcodeDetector tidak tersedia");
+  function isSecureScanContext() {
+    return window.isSecureContext === true;
+  }
+
+  async function getCameraStream() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("Browser tidak mendukung kamera.");
     }
 
-    scanEngine = "detector";
-    clearScanViewport();
-
-    scanStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: { ideal: "environment" },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+    const attempts = [
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
       },
+      { audio: false, video: { facingMode: { ideal: "environment" } } },
+      { audio: false, video: { facingMode: "environment" } },
+      { audio: false, video: true },
+    ];
+
+    let lastError = null;
+    for (let i = 0; i < attempts.length; i += 1) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(attempts[i]);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("Gagal akses kamera");
+  }
+
+  function createScanVideoElement(stream) {
+    const video = document.createElement("video");
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("autoplay", "true");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    return video;
+  }
+
+  async function playScanVideo(video) {
+    return new Promise(function (resolve, reject) {
+      video.onloadedmetadata = function () {
+        video
+          .play()
+          .then(resolve)
+          .catch(reject);
+      };
+      video.onerror = function () {
+        reject(new Error("Video kamera gagal dimuat"));
+      };
     });
+  }
 
-    scanVideo = document.createElement("video");
-    scanVideo.setAttribute("playsinline", "true");
-    scanVideo.setAttribute("webkit-playsinline", "true");
-    scanVideo.muted = true;
-    scanVideo.autoplay = true;
-    scanVideo.srcObject = scanStream;
-    scanViewport.appendChild(scanVideo);
-    await scanVideo.play();
-
+  function startDetectorLoop(video) {
     const detector = new BarcodeDetector({ formats: ["code_128"] });
-    isScanning = true;
-    setScanButtonState(true);
-
     scanLoopId = setInterval(function () {
-      if (!isScanning || !scanVideo) return;
+      if (!isScanning || !video || video.readyState < 2) return;
       detector
-        .detect(scanVideo)
+        .detect(video)
         .then(function (codes) {
           if (codes && codes.length > 0) {
             handleScanSuccess(codes[0].rawValue);
           }
         })
         .catch(function () {});
-    }, 250);
+    }, 300);
   }
 
-  function startZxingScanner() {
-    return new Promise(function (resolve, reject) {
-      if (typeof ZXing === "undefined" || !ZXing.BrowserMultiFormatReader) {
-        reject(new Error("Library ZXing tidak termuat"));
-        return;
-      }
+  function startZxingVideoLoop(video) {
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 
-      scanEngine = "zxing";
-      clearScanViewport();
-      stopZxingReader();
+    zxingReader = new ZXing.BrowserMultiFormatReader(hints, 350);
 
-      const hints = new Map();
-      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
-      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-
-      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 500);
-
-      zxingReader
-        .decodeFromVideoDevice(null, scanViewport, function (result, error) {
-          if (result) {
-            handleScanSuccess(result.getText());
-          }
-          if (error && !(error instanceof ZXing.NotFoundException)) {
-            // ignore frame errors
-          }
-        })
-        .then(function () {
-          isScanning = true;
-          setScanButtonState(true);
-          const video = scanViewport.querySelector("video");
-          if (video) {
-            video.setAttribute("playsinline", "true");
-            video.setAttribute("webkit-playsinline", "true");
-            video.muted = true;
-          }
-          resolve();
-        })
-        .catch(reject);
-    });
-  }
-
-  async function startScanner() {
-    if (isScanning) return;
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showToast("Browser tidak support kamera. Pakai Scan dari Foto.", true);
+    if (typeof zxingReader.decodeFromVideoElementContinuously === "function") {
+      zxingReader.decodeFromVideoElementContinuously(video, function (result) {
+        if (result) handleScanSuccess(result.getText());
+      });
       return;
     }
 
-    scanStatus.textContent = "Membuka kamera...";
+    scanLoopId = setInterval(function () {
+      if (!isScanning || !video || video.readyState < 2 || !zxingReader) return;
+      zxingReader
+        .decodeFromVideoElement(video)
+        .then(function (result) {
+          handleScanSuccess(result.getText());
+        })
+        .catch(function () {});
+    }, 400);
+  }
+
+  function getScanErrorMessage(error) {
+    const name = error && error.name ? error.name : "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      return "Kamera ditolak. Pakai Ambil Foto Barcode, atau allow kamera di setting browser.";
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      return "Kamera tidak ditemukan di perangkat ini.";
+    }
+    if (name === "NotReadableError" || name === "TrackStartError") {
+      return "Kamera sedang dipakai app lain. Tutup app lain lalu coba lagi.";
+    }
+    if (name === "SecurityError" || !isSecureScanContext()) {
+      return "Buka lewat HTTPS. Kamera tidak jalan di file lokal.";
+    }
+    return "Gagal buka kamera. Coba tombol Ambil Foto Barcode.";
+  }
+
+  async function startLiveScanner() {
+    if (isScanning || scanStartPending) return;
+
+    if (!isSecureScanContext()) {
+      scanStatus.textContent = "Butuh HTTPS agar kamera live jalan";
+      showToast("Buka lewat HTTPS (GitHub Pages).", true);
+      return;
+    }
+
+    scanStartPending = true;
+    scanStatus.textContent = "Meminta izin kamera...";
+    stopScanStream();
+    stopZxingReader();
+    await stopHtml5Scanner();
 
     try {
-      if ("BarcodeDetector" in window) {
-        await startNativeScanner();
+      if (typeof Html5Qrcode !== "undefined") {
+        await startHtml5LiveScanner();
+        isScanning = true;
+        setScanButtonState(true);
+        scanStartPending = false;
         return;
       }
     } catch (error) {
-      stopScanStream();
-      clearScanViewport();
+      await stopHtml5Scanner();
     }
 
     try {
-      await startZxingScanner();
+      scanStream = await getCameraStream();
+      clearScanViewport();
+      scanVideo = createScanVideoElement(scanStream);
+      scanViewport.appendChild(scanVideo);
+      await playScanVideo(scanVideo);
+
+      if ("BarcodeDetector" in window) {
+        scanEngine = "detector";
+        startDetectorLoop(scanVideo);
+      } else if (typeof ZXing !== "undefined") {
+        scanEngine = "zxing";
+        startZxingVideoLoop(scanVideo);
+      } else {
+        throw new Error("Scanner tidak tersedia");
+      }
+
+      isScanning = true;
+      setScanButtonState(true);
     } catch (error) {
-      stopScanner();
-      showToast(
-        "Gagal buka kamera. Izinkan akses kamera, atau pakai Scan dari Foto.",
-        true
-      );
+      stopScanStream();
+      stopZxingReader();
+      showScanPlaceholder();
+      isScanning = false;
+      setScanButtonState(false);
+      scanStatus.textContent = getScanErrorMessage(error);
+      showToast(getScanErrorMessage(error), true);
     }
+
+    scanStartPending = false;
   }
 
   async function stopScanner() {
-    if (!isScanning) return;
-
     stopScanStream();
     stopZxingReader();
-    clearScanViewport();
-
+    await stopHtml5Scanner();
+    showScanPlaceholder();
     isScanning = false;
     scanEngine = null;
+    scanStartPending = false;
     setScanButtonState(false);
   }
 
   function decodeScanFromImage(file) {
+    decodeScanFromImageFile(file);
+  }
+
+  async function decodeScanFromImageFile(file) {
     if (!file) return;
 
-    if (typeof ZXing === "undefined" || !ZXing.BrowserMultiFormatReader) {
-      showToast("Library scanner belum termuat.", true);
-      return;
-    }
-
     scanStatus.textContent = "Membaca foto...";
-    const reader = new ZXing.BrowserMultiFormatReader();
+
     const url = URL.createObjectURL(file);
     const img = new Image();
 
-    img.onload = function () {
-      reader
-        .decodeFromImageElement(img)
-        .then(function (result) {
-          handleScanSuccess(result.getText());
-          scanStatus.textContent = isScanning
-            ? "Arahkan ke barcode Code128..."
-            : "Tap Mulai Scan untuk buka kamera";
-        })
-        .catch(function () {
-          showToast("Barcode tidak terbaca di foto. Coba foto lebih dekat & fokus.", true);
-          scanStatus.textContent = isScanning
-            ? "Arahkan ke barcode Code128..."
-            : "Tap Mulai Scan untuk buka kamera";
-        })
-        .finally(function () {
-          URL.revokeObjectURL(url);
-          reader.reset();
-        });
-    };
+    try {
+      await new Promise(function (resolve, reject) {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
 
-    img.onerror = function () {
+      if ("BarcodeDetector" in window) {
+        try {
+          const detector = new BarcodeDetector({ formats: ["code_128"] });
+          const codes = await detector.detect(img);
+          if (codes && codes.length > 0) {
+            handleScanSuccess(codes[0].rawValue);
+            return;
+          }
+        } catch (error) {
+          // fallback ke ZXing
+        }
+      }
+
+      if (typeof ZXing === "undefined" || !ZXing.BrowserMultiFormatReader) {
+        throw new Error("Library scanner belum termuat");
+      }
+
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      const reader = new ZXing.BrowserMultiFormatReader(hints);
+      const result = await reader.decodeFromImageElement(img);
+      handleScanSuccess(result.getText());
+    } catch (error) {
+      showToast("Barcode tidak terbaca. Foto lebih dekat, fokus, & pencahayaan cukup.", true);
+      scanStatus.textContent = isScanning
+        ? "Arahkan ke barcode Code128..."
+        : "Tap tab Scan untuk buka kamera";
+    } finally {
       URL.revokeObjectURL(url);
-      showToast("Foto tidak bisa dibaca.", true);
-    };
-
-    img.src = url;
+    }
   }
 
   scanToggleBtn.addEventListener("click", function () {
     if (isScanning) stopScanner();
-    else startScanner();
+    else startLiveScanner();
   });
 
   scanPhotoBtn.addEventListener("click", function () {
