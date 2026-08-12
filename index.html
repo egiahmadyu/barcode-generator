@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Barcode Label</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="app-header-inner">
+        <div class="app-brand">
+          <span class="app-icon" aria-hidden="true">🏷️</span>
+          <div>
+            <h1>Barcode Label</h1>
+            <p>Tom & Jerry No. 103 · 12 label</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <!-- TAB: LABEL -->
+      <section id="tab-label" class="tab-panel active">
+        <div class="section-title">Pengaturan Label</div>
+
+        <div class="card card-preview">
+          <div class="card-label">Preview label</div>
+          <div class="label-preview-stage">
+            <img id="labelPreviewImg" class="label-preview-img" alt="Preview label">
+          </div>
+          <p class="hint label-preview-hint">Tampilan aktual · 64×32 mm · update otomatis</p>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Logo (opsional)</div>
+          <input type="file" id="logoInput" accept="image/png,image/jpeg,image/webp" hidden>
+          <div class="logo-actions">
+            <button type="button" id="logoBrowseBtn" class="btn btn-outline btn-block">📷 Upload Logo</button>
+            <button type="button" id="logoClearBtn" class="btn btn-ghost hidden">Hapus</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Kode barcode</div>
+          <div class="form-group">
+            <label for="codePrefix" class="sub-label">Awalan</label>
+            <input type="text" id="codePrefix" value="SHM-ME-" placeholder="SHM-ME-">
+          </div>
+          <div class="form-grid form-grid-2">
+            <div>
+              <label for="codeStart" class="sub-label">Nomor awal</label>
+              <input type="number" id="codeStart" value="1" min="0">
+            </div>
+            <div>
+              <label for="codeDigits" class="sub-label">Digit</label>
+              <input type="number" id="codeDigits" value="4" min="1" max="10">
+            </div>
+          </div>
+          <div class="preview-chip">Preview: <strong id="codePreview">SHM-ME-0001</strong></div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Footer label</div>
+          <div class="form-group">
+            <label for="footerText" class="sub-label">Teks footer</label>
+            <input type="text" id="footerText" value="PROPERTY OF PT SELARAS HASANAH MEDIKA">
+          </div>
+          <div class="form-grid form-grid-2">
+            <div>
+              <label for="footerBgColor" class="sub-label">Warna latar</label>
+              <div class="color-input-wrap">
+                <input type="color" id="footerBgColor" value="#000000">
+                <input type="text" id="footerBgColorHex" value="#000000" maxlength="7">
+              </div>
+            </div>
+            <div>
+              <label for="footerTextColor" class="sub-label">Warna teks</label>
+              <div class="color-input-wrap">
+                <input type="color" id="footerTextColor" value="#ffffff">
+                <input type="text" id="footerTextColorHex" value="#ffffff" maxlength="7">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Lembar stiker</div>
+          <div class="sheet-diagram" aria-hidden="true">
+            <div class="sheet-grid">
+              <span></span><span></span><span></span>
+              <span></span><span></span><span></span>
+              <span></span><span></span><span></span>
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+          <p class="hint">3×4 grid · kertas 20,5×16,5 cm · landscape</p>
+        </div>
+
+        <details class="card calibration">
+          <summary>Kalibrasi print</summary>
+          <div class="form-grid form-grid-2">
+            <div>
+              <label for="calMarginTop" class="sub-label">Margin atas</label>
+              <input type="number" id="calMarginTop" value="9" step="0.1">
+            </div>
+            <div>
+              <label for="calMarginLeft" class="sub-label">Margin kiri</label>
+              <input type="number" id="calMarginLeft" value="3" step="0.1">
+            </div>
+            <div>
+              <label for="calPitchH" class="sub-label">Pitch H</label>
+              <input type="number" id="calPitchH" value="67" step="0.1">
+            </div>
+            <div>
+              <label for="calPitchV" class="sub-label">Pitch V</label>
+              <input type="number" id="calPitchV" value="38" step="0.1">
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- TAB: UPLOAD -->
+      <section id="tab-upload" class="tab-panel">
+        <div class="section-title">Upload & Generate</div>
+
+        <div class="card">
+          <p class="hint">Excel wajib punya kolom <strong>Nama</strong>. Kolom Kode Barcode ditambah otomatis.</p>
+
+          <div id="dropZone" class="drop-zone">
+            <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xltx,.xltm" hidden>
+            <div class="drop-zone-icon">📊</div>
+            <p class="drop-zone-title">Pilih file Excel</p>
+            <p class="drop-zone-sub">Tap untuk browse · .xlsx</p>
+          </div>
+
+          <div id="fileInfo" class="file-chip hidden">
+            <span class="file-chip-icon">✓</span>
+            <span id="fileName" class="file-chip-name"></span>
+            <button type="button" id="clearBtn" class="file-chip-clear" aria-label="Hapus file">✕</button>
+          </div>
+
+          <button type="button" id="sampleBtn" class="btn btn-outline btn-block">⬇ Download Sample Excel</button>
+        </div>
+
+        <section id="resultSection" class="card card-success hidden">
+          <div class="card-label">✅ Berhasil!</div>
+          <p id="resultMessage" class="success-msg"></p>
+          <a id="downloadLink" class="btn btn-primary btn-block" download="barcode_labels.zip">⬇ Download ZIP</a>
+        </section>
+      </section>
+
+      <!-- TAB: HELP -->
+      <section id="tab-help" class="tab-panel">
+        <div class="section-title">Panduan</div>
+        <div class="card">
+          <ol class="steps-list">
+            <li>Tab <strong>Label</strong> — atur kode, footer, logo</li>
+            <li>Tab <strong>Upload</strong> — pilih Excel produk</li>
+            <li>Tap <strong>Generate Barcode</strong></li>
+            <li>Download ZIP (Word + Excel)</li>
+            <li>Print Word: kertas <strong>20,5×16,5 cm</strong>, scale <strong>100%</strong>, landscape</li>
+            <li>Test HVS dulu sebelum pakai stiker kuning</li>
+          </ol>
+        </div>
+        <div class="card card-muted">
+          <p class="hint">100% client-side · data tidak di-upload ke server · cocok GitHub Pages</p>
+        </div>
+      </section>
+    </main>
+
+    <div class="bottom-bar">
+      <button type="button" id="generateBtn" class="btn btn-primary btn-generate" disabled>
+        ⚡ Generate Barcode
+      </button>
+    </div>
+
+    <nav class="bottom-nav" aria-label="Navigasi">
+      <button type="button" class="nav-item active" data-tab="tab-label">
+        <span class="nav-icon">⚙️</span>
+        <span>Label</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="tab-upload">
+        <span class="nav-icon">📤</span>
+        <span>Upload</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="tab-help">
+        <span class="nav-icon">❓</span>
+        <span>Panduan</span>
+      </button>
+    </nav>
+
+    <div id="loading" class="loading hidden">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <p>Generate barcode...</p>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

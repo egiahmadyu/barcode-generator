@@ -1,0 +1,840 @@
+/* global XLSX, JsBarcode, JSZip, saveAs */
+
+(function () {
+  "use strict";
+
+  // Tom & Jerry No. 103 — lembar kuning 12 label (3×4), kertas 20,5×16,5 cm, label 64×32 mm
+  const LABEL_CONFIG = {
+    SHEET_NAME: "Tom & Jerry No. 103 (12 label)",
+    PAGE_WIDTH_MM: 205,
+    PAGE_HEIGHT_MM: 165,
+    COLS: 3,
+    ROWS: 4,
+    LABELS_PER_PAGE: 12,
+    LABEL_WIDTH_MM: 64,
+    LABEL_HEIGHT_MM: 32,
+    DEFAULT_MARGIN_TOP_MM: 9,
+    DEFAULT_MARGIN_LEFT_MM: 3,
+    DEFAULT_HORIZONTAL_PITCH_MM: 67,
+    DEFAULT_VERTICAL_PITCH_MM: 38,
+    FOOTER_HEIGHT_MM: 7.5,
+    FOOTER_FONT_MM: 2,
+    LOGO_SIZE_MM: 13,
+    LOGO_ZONE_MM: 16,
+    BARCODE_HEIGHT_MM: 9,
+    BARCODE_MAX_WIDTH_MM: 38,
+    PADDING_X_MM: 1.5,
+    PADDING_Y_MM: 1,
+    CODE_FONT_MM: 2.1,
+    LOGO_GAP_MM: 0.5,
+    CODE_GAP_MM: 0.35,
+    RENDER_DPI: 300,
+  };
+
+  const EXCEL_CONFIG = {
+    NAME_HEADERS: new Set(["nama", "name", "produk", "product", "nama produk", "product name"]),
+    BARCODE_HEADERS: new Set(["kode barcode", "barcode", "kode", "code", "barcode code"]),
+    DEFAULT_PREFIX: "BR",
+    DEFAULT_PADDING: 3,
+    BARCODE_COLUMN: "Kode Barcode",
+    NAME_COLUMN: "Nama",
+  };
+
+  function mmToTwip(mm) {
+    return Math.round(mm * 56.6929133858);
+  }
+
+  function mmToEmu(mm) {
+    return Math.round((mm * 914400) / 25.4);
+  }
+
+  function mmToPx(mm) {
+    return Math.round((mm / 25.4) * LABEL_CONFIG.RENDER_DPI);
+  }
+
+  function escapeXml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function formatBarcodeDisplay(code) {
+    const normalized = String(code).trim().toUpperCase();
+    const alphaNum = normalized.match(/^([A-Z]+)(\d+)$/);
+    if (alphaNum) return alphaNum[1] + " - " + alphaNum[2];
+    if (normalized.indexOf("-") >= 0) {
+      return normalized.replace(/\s*-\s*/g, " - ");
+    }
+    return normalized.split("").join(" ");
+  }
+
+  function normalizeHeader(value) {
+    if (value == null) return "";
+    return String(value).trim().toLowerCase();
+  }
+
+  function findColumnIndex(headers, candidates) {
+    for (let i = 0; i < headers.length; i += 1) {
+      if (candidates.has(headers[i])) return i;
+    }
+    return -1;
+  }
+
+  function parseCodeConfig(prefixInput, startInput, digitsInput) {
+    const prefix = String(prefixInput).trim().toUpperCase();
+    const startNum = parseInt(String(startInput).trim(), 10);
+    const padding = parseInt(String(digitsInput).trim(), 10);
+
+    if (!prefix) {
+      throw new Error("Awalan kode wajib diisi (contoh: SHM-ME-).");
+    }
+    if (!/^[A-Z0-9\-]+$/.test(prefix)) {
+      throw new Error("Awalan kode hanya boleh huruf, angka, dan tanda minus (-).");
+    }
+    if (isNaN(startNum) || startNum < 0) {
+      throw new Error("Nomor awal sequence tidak valid.");
+    }
+    if (isNaN(padding) || padding < 1 || padding > 10) {
+      throw new Error("Digit sequence harus antara 1–10.");
+    }
+
+    return { prefix: prefix, startNum: startNum, padding: padding };
+  }
+
+  function buildCodeFromSequence(prefix, counter, padding) {
+    return prefix + String(counter).padStart(padding, "0");
+  }
+
+  function updateCodePreview(prefixInput, startInput, digitsInput, previewEl) {
+    try {
+      const config = parseCodeConfig(prefixInput, startInput, digitsInput);
+      const first = buildCodeFromSequence(config.prefix, config.startNum, config.padding);
+      const second = buildCodeFromSequence(config.prefix, config.startNum + 1, config.padding);
+      previewEl.textContent = first + ", " + second + ", ...";
+    } catch (error) {
+      previewEl.textContent = "-";
+    }
+  }
+
+  function nextBarcodeCode(existingCodes, counter, prefix, padding) {
+    while (true) {
+      const code = buildCodeFromSequence(prefix, counter, padding);
+      counter += 1;
+      if (!existingCodes.has(code)) {
+        existingCodes.add(code);
+        return { code: code, counter: counter };
+      }
+    }
+  }
+
+  function sheetToRows(sheet) {
+    if (!sheet || !sheet["!ref"]) return [];
+    return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  }
+
+  function rowsToSheet(rows) {
+    return XLSX.utils.aoa_to_sheet(rows);
+  }
+
+  function createSampleExcel() {
+    const rows = [
+      [EXCEL_CONFIG.NAME_COLUMN],
+      ["Sabun Lifebuoy"],
+      ["Shampoo Clear 170ml"],
+      ["Minyak Goreng 1L"],
+      ["Teh Botol Sosro"],
+      ["Air Mineral 600ml"],
+    ];
+    const sheet = rowsToSheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Produk");
+    return XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  }
+
+  function downloadSampleExcel() {
+    const data = createSampleExcel();
+    const blob = new Blob([data], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    saveAs(blob, "sample_produk.xlsx");
+  }
+
+  function processExcel(arrayBuffer, codeConfig) {
+    let workbook;
+    try {
+      workbook = XLSX.read(arrayBuffer, { type: "array" });
+    } catch (error) {
+      throw new Error("File Excel tidak valid atau tidak bisa dibaca.");
+    }
+
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = sheetToRows(sheet);
+
+    if (rows.length === 0) throw new Error("File Excel kosong.");
+
+    const headers = rows[0].map(normalizeHeader);
+    const nameCol = findColumnIndex(headers, EXCEL_CONFIG.NAME_HEADERS);
+    if (nameCol === -1) {
+      throw new Error("Kolom nama produk tidak ditemukan. Pastikan ada kolom '" + EXCEL_CONFIG.NAME_COLUMN + "'.");
+    }
+
+    let barcodeCol = findColumnIndex(headers, EXCEL_CONFIG.BARCODE_HEADERS);
+    if (barcodeCol === -1) {
+      barcodeCol = headers.length;
+      rows[0][barcodeCol] = EXCEL_CONFIG.BARCODE_COLUMN;
+      headers.push(normalizeHeader(EXCEL_CONFIG.BARCODE_COLUMN));
+    }
+
+    const prefix = codeConfig.prefix;
+    const padding = codeConfig.padding;
+    const existingCodes = new Set();
+    let counter = codeConfig.startNum;
+
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+      const rawCode = rows[rowIndex][barcodeCol];
+      if (rawCode != null && String(rawCode).trim()) {
+        const code = String(rawCode).trim().toUpperCase();
+        existingCodes.add(code);
+        if (code.indexOf(prefix) === 0) {
+          const suffix = code.slice(prefix.length);
+          if (/^\d+$/.test(suffix)) {
+            counter = Math.max(counter, Number(suffix) + 1);
+          }
+        }
+      }
+    }
+    const products = [];
+
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+      const nameValue = rows[rowIndex][nameCol];
+      if (nameValue == null || !String(nameValue).trim()) continue;
+
+      const name = String(nameValue).trim();
+      const rawCode = rows[rowIndex][barcodeCol];
+      let barcode;
+
+      if (rawCode != null && String(rawCode).trim()) {
+        barcode = String(rawCode).trim().toUpperCase();
+      } else {
+        const result = nextBarcodeCode(existingCodes, counter, prefix, padding);
+        barcode = result.code;
+        counter = result.counter;
+        rows[rowIndex][barcodeCol] = barcode;
+      }
+
+      products.push({ name: name, barcode: barcode, rowIndex: rowIndex });
+    }
+
+    if (products.length === 0) {
+      throw new Error("Tidak ada data produk yang valid di Excel.");
+    }
+
+    workbook.Sheets[sheetName] = rowsToSheet(rows);
+    const updatedExcel = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    return { products: products, updatedExcel: updatedExcel };
+  }
+
+  function canvasToUint8Array(canvas) {
+    const dataUrl = canvas.toDataURL("image/png");
+    const base64 = dataUrl.split(",")[1];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function normalizeHexColor(value, fallback) {
+    const raw = String(value).trim();
+    if (/^#[0-9A-Fa-f]{6}$/.test(raw)) return raw.toUpperCase();
+    if (/^[0-9A-Fa-f]{6}$/.test(raw)) return ("#" + raw).toUpperCase();
+    return fallback;
+  }
+
+  function parseFooterStyle(text, bgColor, textColor) {
+    return {
+      text: String(text).trim() || "PROPERTY OF PT SELARAS HASANAH MEDIKA",
+      bgColor: normalizeHexColor(bgColor, "#000000"),
+      textColor: normalizeHexColor(textColor, "#FFFFFF"),
+    };
+  }
+
+  function syncColorInputs(colorInput, hexInput) {
+    hexInput.value = colorInput.value.toUpperCase();
+  }
+
+  function syncHexToColor(colorInput, hexInput) {
+    const normalized = normalizeHexColor(hexInput.value, colorInput.value);
+    hexInput.value = normalized;
+    colorInput.value = normalized;
+  }
+
+  function getPreviewCode() {
+    try {
+      const config = parseCodeConfig(
+        codePrefixInput.value,
+        codeStartInput.value,
+        codeDigitsInput.value
+      );
+      return buildCodeFromSequence(config.prefix, config.startNum, config.padding);
+    } catch (error) {
+      return "SHM-ME-0001";
+    }
+  }
+
+  function refreshLabelPreview() {
+    const footerStyle = parseFooterStyle(
+      footerTextInput.value,
+      footerBgColorHexInput.value,
+      footerTextColorHexInput.value
+    );
+    const code = getPreviewCode();
+    const bytes = generateLabelPng(code, logoImage, footerStyle);
+    const blob = new Blob([bytes], { type: "image/png" });
+    if (labelPreviewObjectUrl) URL.revokeObjectURL(labelPreviewObjectUrl);
+    labelPreviewObjectUrl = URL.createObjectURL(blob);
+    labelPreviewImg.src = labelPreviewObjectUrl;
+  }
+
+  function drawFooter(ctx, text, width, footerTop, footerHeight, bgColor, textColor) {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, footerTop, width, footerHeight);
+
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    let fontSize = mmToPx(LABEL_CONFIG.FOOTER_FONT_MM);
+    ctx.font = "bold " + fontSize + "px Arial, sans-serif";
+
+    while (fontSize > 5 && ctx.measureText(text).width > width - mmToPx(3)) {
+      fontSize -= 1;
+      ctx.font = "bold " + fontSize + "px Arial, sans-serif";
+    }
+
+    ctx.fillText(text, width / 2, footerTop + footerHeight / 2);
+  }
+
+  function drawBarcodeOnCanvas(ctx, code, x, y, width, height) {
+    const tempCanvas = document.createElement("canvas");
+    JsBarcode(tempCanvas, code, {
+      format: "CODE128",
+      displayValue: false,
+      margin: 0,
+      width: 2,
+      height: 100,
+    });
+    ctx.drawImage(tempCanvas, x, y, width, height);
+  }
+
+  function generateLabelPng(code, logoImage, footerStyle) {
+    const width = mmToPx(LABEL_CONFIG.LABEL_WIDTH_MM);
+    const height = mmToPx(LABEL_CONFIG.LABEL_HEIGHT_MM);
+    const footerHeight = mmToPx(LABEL_CONFIG.FOOTER_HEIGHT_MM);
+    const topHeight = height - footerHeight;
+    const padX = mmToPx(LABEL_CONFIG.PADDING_X_MM);
+    const padY = mmToPx(LABEL_CONFIG.PADDING_Y_MM);
+    const logoSize = logoImage ? mmToPx(LABEL_CONFIG.LOGO_SIZE_MM) : 0;
+    const logoZoneWidth = logoImage ? mmToPx(LABEL_CONFIG.LOGO_ZONE_MM) : 0;
+    const barcodeHeight = mmToPx(LABEL_CONFIG.BARCODE_HEIGHT_MM);
+    const codeFontSize = mmToPx(LABEL_CONFIG.CODE_FONT_MM);
+    const codeGap = mmToPx(LABEL_CONFIG.CODE_GAP_MM);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+
+    const contentLeft = logoZoneWidth > 0 ? logoZoneWidth : padX;
+    const contentWidth = width - contentLeft - padX;
+
+    const displayCode = formatBarcodeDisplay(code);
+    ctx.font = "600 " + codeFontSize + "px Arial, sans-serif";
+    const codeTextHeight = codeFontSize * 1.15;
+    const barcodeMaxWidth = mmToPx(LABEL_CONFIG.BARCODE_MAX_WIDTH_MM);
+    const barcodeWidth = Math.min(barcodeMaxWidth, contentWidth * 0.92);
+    const blockHeight = barcodeHeight + codeGap + codeTextHeight;
+    const blockTop = padY + Math.max(0, (topHeight - padY * 2 - blockHeight) / 2);
+    const blockCenterY = blockTop + blockHeight / 2;
+    const barcodeX = contentLeft + (contentWidth - barcodeWidth) / 2;
+
+    if (logoImage) {
+      const logoX = padX + Math.max(0, (logoZoneWidth - padX - logoSize) / 2);
+      const logoY = blockCenterY - logoSize / 2;
+      ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
+    }
+
+    drawBarcodeOnCanvas(ctx, code, barcodeX, blockTop, barcodeWidth, barcodeHeight);
+
+    ctx.fillStyle = "#000000";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "600 " + codeFontSize + "px Arial, sans-serif";
+    ctx.fillText(displayCode, contentLeft + contentWidth / 2, blockTop + barcodeHeight + codeGap);
+
+    drawFooter(
+      ctx,
+      footerStyle.text,
+      width,
+      topHeight,
+      footerHeight,
+      footerStyle.bgColor,
+      footerStyle.textColor
+    );
+
+    return canvasToUint8Array(canvas);
+  }
+
+  function generateLabelImages(products, logoImage, footerStyle) {
+    const images = new Map();
+    for (let i = 0; i < products.length; i += 1) {
+      const product = products[i];
+      if (!images.has(product.barcode)) {
+        images.set(product.barcode, generateLabelPng(product.barcode, logoImage, footerStyle));
+      }
+    }
+    return images;
+  }
+
+  function loadImageFromBytes(bytes) {
+    return new Promise(function (resolve, reject) {
+      const blob = new Blob([bytes], { type: "image/png" });
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Gagal memuat gambar label."));
+      };
+      img.src = url;
+    });
+  }
+
+  async function buildLabelImageCache(labelImages) {
+    const cache = new Map();
+    const entries = Array.from(labelImages.entries());
+    for (let i = 0; i < entries.length; i += 1) {
+      cache.set(entries[i][0], await loadImageFromBytes(entries[i][1]));
+    }
+    return cache;
+  }
+
+  function getSheetLayout() {
+    const marginTop = parseFloat(document.getElementById("calMarginTop").value);
+    const marginLeft = parseFloat(document.getElementById("calMarginLeft").value);
+    const horizontalPitch = parseFloat(document.getElementById("calPitchH").value);
+    const verticalPitch = parseFloat(document.getElementById("calPitchV").value);
+
+    return {
+      pageWidthMm: LABEL_CONFIG.PAGE_WIDTH_MM,
+      pageHeightMm: LABEL_CONFIG.PAGE_HEIGHT_MM,
+      marginTopMm: isNaN(marginTop) ? LABEL_CONFIG.DEFAULT_MARGIN_TOP_MM : marginTop,
+      marginLeftMm: isNaN(marginLeft) ? LABEL_CONFIG.DEFAULT_MARGIN_LEFT_MM : marginLeft,
+      horizontalPitchMm: isNaN(horizontalPitch) ? LABEL_CONFIG.DEFAULT_HORIZONTAL_PITCH_MM : horizontalPitch,
+      verticalPitchMm: isNaN(verticalPitch) ? LABEL_CONFIG.DEFAULT_VERTICAL_PITCH_MM : verticalPitch,
+      labelWidthMm: LABEL_CONFIG.LABEL_WIDTH_MM,
+      labelHeightMm: LABEL_CONFIG.LABEL_HEIGHT_MM,
+      cols: LABEL_CONFIG.COLS,
+      rows: LABEL_CONFIG.ROWS,
+    };
+  }
+
+  async function generatePagePng(products, startIndex, labelImageCache, sheetLayout) {
+    const pageWidth = mmToPx(sheetLayout.pageWidthMm);
+    const pageHeight = mmToPx(sheetLayout.pageHeightMm);
+    const labelWidth = mmToPx(sheetLayout.labelWidthMm);
+    const labelHeight = mmToPx(sheetLayout.labelHeightMm);
+    const marginLeft = mmToPx(sheetLayout.marginLeftMm);
+    const marginTop = mmToPx(sheetLayout.marginTopMm);
+    const horizontalPitch = mmToPx(sheetLayout.horizontalPitchMm);
+    const verticalPitch = mmToPx(sheetLayout.verticalPitchMm);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = pageWidth;
+    canvas.height = pageHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pageWidth, pageHeight);
+
+    for (let rowIndex = 0; rowIndex < sheetLayout.rows; rowIndex += 1) {
+      for (let colIndex = 0; colIndex < sheetLayout.cols; colIndex += 1) {
+        const productIndex = startIndex + rowIndex * sheetLayout.cols + colIndex;
+        if (productIndex >= products.length) continue;
+
+        const product = products[productIndex];
+        const labelImg = labelImageCache.get(product.barcode);
+        if (!labelImg) continue;
+
+        const x = marginLeft + colIndex * horizontalPitch;
+        const y = marginTop + rowIndex * verticalPitch;
+        ctx.drawImage(labelImg, x, y, labelWidth, labelHeight);
+      }
+    }
+
+    return canvasToUint8Array(canvas);
+  }
+
+  function buildFullPageParagraph(relId, docPrId, pageBreakBefore) {
+    const widthEmu = mmToEmu(LABEL_CONFIG.PAGE_WIDTH_MM);
+    const heightEmu = mmToEmu(LABEL_CONFIG.PAGE_HEIGHT_MM);
+    const pageBreakXml = pageBreakBefore ? "<w:pageBreakBefore/>" : "";
+
+    return (
+      "<w:p><w:pPr>" + pageBreakXml +
+      "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"0\" w:lineRule=\"exact\"/>" +
+      "<w:jc w:val=\"left\"/></w:pPr>" +
+      "<w:r><w:drawing>" +
+      "<wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" " +
+      "relativeHeight=\"251658240\" behindDoc=\"0\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\" " +
+      "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">" +
+      "<wp:simplePos x=\"0\" y=\"0\"/>" +
+      "<wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH>" +
+      "<wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV>" +
+      "<wp:extent cx=\"" + widthEmu + "\" cy=\"" + heightEmu + "\"/>" +
+      "<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>" +
+      "<wp:wrapNone/>" +
+      "<wp:docPr id=\"" + docPrId + "\" name=\"page\"/>" +
+      "<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\" " +
+      "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"/></wp:cNvGraphicFramePr>" +
+      "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">" +
+      "<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+      "<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+      "<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"page\"/><pic:cNvPicPr/></pic:nvPicPr>" +
+      "<pic:blipFill><a:blip r:embed=\"" + relId + "\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"/>" +
+      "<a:stretch><a:fillRect/></a:stretch></pic:blipFill>" +
+      "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + widthEmu + "\" cy=\"" + heightEmu + "\"/></a:xfrm>" +
+      "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>" +
+      "</pic:pic></a:graphicData></a:graphic></wp:anchor>" +
+      "</w:drawing></w:r></w:p>"
+    );
+  }
+
+  async function generateLabelDocument(products, labelImages, sheetLayout) {
+    const labelImageCache = await buildLabelImageCache(labelImages);
+    const pageImages = [];
+    let startIndex = 0;
+
+    while (startIndex < products.length) {
+      pageImages.push(await generatePagePng(products, startIndex, labelImageCache, sheetLayout));
+      startIndex += LABEL_CONFIG.LABELS_PER_PAGE;
+    }
+
+    let bodyXml = "";
+    for (let pageIndex = 0; pageIndex < pageImages.length; pageIndex += 1) {
+      bodyXml += buildFullPageParagraph("rId" + (pageIndex + 2), pageIndex + 1, pageIndex > 0);
+    }
+
+    bodyXml +=
+      "<w:sectPr>" +
+      "<w:pgSz w:w=\"" + mmToTwip(LABEL_CONFIG.PAGE_WIDTH_MM) + "\" w:h=\"" + mmToTwip(LABEL_CONFIG.PAGE_HEIGHT_MM) + "\"/>" +
+      "<w:pgMar w:top=\"0\" w:right=\"0\" w:bottom=\"0\" w:left=\"0\" " +
+      "w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/>" +
+      "</w:sectPr>";
+
+    const documentXml =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" " +
+      "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" " +
+      "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" " +
+      "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" " +
+      "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+      "<w:body>" + bodyXml + "</w:body></w:document>";
+
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+        "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
+        "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+        "<Default Extension=\"png\" ContentType=\"image/png\"/>" +
+        "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>" +
+        "</Types>"
+    );
+
+    zip.file(
+      "_rels/.rels",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+        "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>" +
+        "</Relationships>"
+    );
+
+    zip.file("word/document.xml", documentXml);
+
+    let relsXml =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
+
+    for (let pageIndex = 0; pageIndex < pageImages.length; pageIndex += 1) {
+      const relId = "rId" + (pageIndex + 2);
+      const fileName = "media/page" + (pageIndex + 1) + ".png";
+      zip.file("word/" + fileName, pageImages[pageIndex]);
+      relsXml +=
+        "<Relationship Id=\"" + relId + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"" + fileName + "\"/>";
+    }
+
+    relsXml += "</Relationships>";
+    zip.file("word/_rels/document.xml.rels", relsXml);
+
+    return zip.generateAsync({ type: "blob" });
+  }
+
+  function loadImageFromFile(file) {
+    return new Promise(function (resolve, reject) {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = function () {
+        resolve({ img: img, url: url });
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Logo tidak bisa dibaca."));
+      };
+      img.src = url;
+    });
+  }
+
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const clearBtn = document.getElementById("clearBtn");
+  const navItems = document.querySelectorAll(".nav-item");
+  const tabPanels = document.querySelectorAll(".tab-panel");
+  const sampleBtn = document.getElementById("sampleBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const fileInfo = document.getElementById("fileInfo");
+  const fileName = document.getElementById("fileName");
+  const resultSection = document.getElementById("resultSection");
+  const resultMessage = document.getElementById("resultMessage");
+  const downloadLink = document.getElementById("downloadLink");
+  const loading = document.getElementById("loading");
+  const toast = document.getElementById("toast");
+  const footerTextInput = document.getElementById("footerText");
+  const footerBgColorInput = document.getElementById("footerBgColor");
+  const footerBgColorHexInput = document.getElementById("footerBgColorHex");
+  const footerTextColorInput = document.getElementById("footerTextColor");
+  const footerTextColorHexInput = document.getElementById("footerTextColorHex");
+  const labelPreviewImg = document.getElementById("labelPreviewImg");
+  const codePrefixInput = document.getElementById("codePrefix");
+  const codeStartInput = document.getElementById("codeStart");
+  const codeDigitsInput = document.getElementById("codeDigits");
+  const codePreview = document.getElementById("codePreview");
+  const logoInput = document.getElementById("logoInput");
+  const logoBrowseBtn = document.getElementById("logoBrowseBtn");
+  const logoClearBtn = document.getElementById("logoClearBtn");
+
+  let selectedFile = null;
+  let downloadUrl = null;
+  let logoImage = null;
+  let logoObjectUrl = null;
+  let labelPreviewObjectUrl = null;
+
+  function switchTab(tabId) {
+    tabPanels.forEach(function (panel) {
+      panel.classList.toggle("active", panel.id === tabId);
+    });
+    navItems.forEach(function (item) {
+      item.classList.toggle("active", item.getAttribute("data-tab") === tabId);
+    });
+  }
+
+  navItems.forEach(function (item) {
+    item.addEventListener("click", function () {
+      switchTab(item.getAttribute("data-tab"));
+    });
+  });
+
+  function showToast(message, isError) {
+    toast.textContent = message;
+    toast.style.background = isError ? "#dc2626" : "#111827";
+    toast.classList.remove("hidden");
+    setTimeout(function () {
+      toast.classList.add("hidden");
+    }, 3500);
+  }
+
+  function setLoading(isLoading) {
+    loading.classList.toggle("hidden", !isLoading);
+    generateBtn.disabled = isLoading || !selectedFile;
+  }
+
+  function resetResult() {
+    resultSection.classList.add("hidden");
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
+      downloadUrl = null;
+    }
+  }
+
+  function setSelectedFile(file) {
+    if (!file) {
+      selectedFile = null;
+      fileInfo.classList.add("hidden");
+      generateBtn.disabled = true;
+      resetResult();
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      showToast("Gunakan file Excel (.xlsx).", true);
+      return;
+    }
+
+    selectedFile = file;
+    fileName.textContent = file.name;
+    fileInfo.classList.remove("hidden");
+    generateBtn.disabled = false;
+    resetResult();
+  }
+
+  logoBrowseBtn.addEventListener("click", function () {
+    logoInput.click();
+  });
+
+  function refreshCodePreview() {
+    updateCodePreview(codePrefixInput.value, codeStartInput.value, codeDigitsInput.value, codePreview);
+    refreshLabelPreview();
+  }
+
+  footerTextInput.addEventListener("input", refreshLabelPreview);
+
+  footerBgColorInput.addEventListener("input", function () {
+    syncColorInputs(footerBgColorInput, footerBgColorHexInput);
+    refreshLabelPreview();
+  });
+
+  footerTextColorInput.addEventListener("input", function () {
+    syncColorInputs(footerTextColorInput, footerTextColorHexInput);
+    refreshLabelPreview();
+  });
+
+  footerBgColorHexInput.addEventListener("input", function () {
+    syncHexToColor(footerBgColorInput, footerBgColorHexInput);
+    refreshLabelPreview();
+  });
+
+  footerTextColorHexInput.addEventListener("input", function () {
+    syncHexToColor(footerTextColorInput, footerTextColorHexInput);
+    refreshLabelPreview();
+  });
+
+  codePrefixInput.addEventListener("input", refreshCodePreview);
+  codeStartInput.addEventListener("input", refreshCodePreview);
+  codeDigitsInput.addEventListener("input", refreshCodePreview);
+  refreshCodePreview();
+
+  logoInput.addEventListener("change", async function (event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+      const loaded = await loadImageFromFile(file);
+      if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+      logoImage = loaded.img;
+      logoObjectUrl = loaded.url;
+      logoClearBtn.classList.remove("hidden");
+      refreshLabelPreview();
+    } catch (error) {
+      showToast(error.message || "Gagal load logo.", true);
+    }
+  });
+
+  logoClearBtn.addEventListener("click", function () {
+    logoImage = null;
+    logoInput.value = "";
+    if (logoObjectUrl) {
+      URL.revokeObjectURL(logoObjectUrl);
+      logoObjectUrl = null;
+    }
+    logoClearBtn.classList.add("hidden");
+    refreshLabelPreview();
+  });
+
+  sampleBtn.addEventListener("click", function () {
+    downloadSampleExcel();
+  });
+
+  fileInput.addEventListener("change", function (event) {
+    setSelectedFile(event.target.files[0] || null);
+  });
+
+  clearBtn.addEventListener("click", function () {
+    fileInput.value = "";
+    setSelectedFile(null);
+  });
+
+  dropZone.addEventListener("click", function () {
+    fileInput.click();
+  });
+
+  dropZone.addEventListener("dragover", function (event) {
+    event.preventDefault();
+    dropZone.classList.add("dragover");
+  });
+
+  dropZone.addEventListener("dragleave", function () {
+    dropZone.classList.remove("dragover");
+  });
+
+  dropZone.addEventListener("drop", function (event) {
+    event.preventDefault();
+    dropZone.classList.remove("dragover");
+    setSelectedFile(event.dataTransfer.files[0] || null);
+  });
+
+  generateBtn.addEventListener("click", async function () {
+    if (!selectedFile) {
+      showToast("Pilih file Excel terlebih dahulu.", true);
+      return;
+    }
+
+    const footerStyle = parseFooterStyle(
+      footerTextInput.value,
+      footerBgColorHexInput.value,
+      footerTextColorHexInput.value
+    );
+    let codeConfig;
+    try {
+      codeConfig = parseCodeConfig(codePrefixInput.value, codeStartInput.value, codeDigitsInput.value);
+    } catch (error) {
+      showToast(error.message, true);
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const result = processExcel(arrayBuffer, codeConfig);
+      const labelImages = generateLabelImages(result.products, logoImage, footerStyle);
+      const sheetLayout = getSheetLayout();
+      const docxBlob = await generateLabelDocument(result.products, labelImages, sheetLayout);
+
+      const zip = new JSZip();
+      zip.file("labels.docx", docxBlob);
+      zip.file("products_updated.xlsx", result.updatedExcel);
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      downloadUrl = URL.createObjectURL(zipBlob);
+      downloadLink.href = downloadUrl;
+      resultMessage.textContent = "Berhasil generate " + result.products.length + " label barcode.";
+      resultSection.classList.remove("hidden");
+      switchTab("tab-upload");
+      resultSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      showToast("Barcode berhasil dibuat!", false);
+    } catch (error) {
+      showToast(error.message || "Terjadi kesalahan.", true);
+    } finally {
+      setLoading(false);
+    }
+  });
+})();
