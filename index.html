@@ -114,7 +114,7 @@
             </div>
             <div>
               <label for="calPitchH" class="sub-label">Pitch H</label>
-              <input type="number" id="calPitchH" value="67" step="0.1">
+              <input type="number" id="calPitchH" value="65.2" step="0.1">
             </div>
             <div>
               <label for="calPitchV" class="sub-label">Pitch V</label>
@@ -154,11 +154,41 @@
         </section>
       </section>
 
+      <!-- TAB: SCAN -->
+      <section id="tab-scan" class="tab-panel">
+        <div class="section-title">Scan Barcode</div>
+
+        <div class="card">
+          <p class="hint">Arahkan kamera ke barcode Code128 di label. Butuh izin kamera & HTTPS.</p>
+          <p id="scanStatus" class="scan-status">Tap Mulai Scan untuk buka kamera</p>
+          <div id="scanViewport" class="scan-viewport"></div>
+          <button type="button" id="scanToggleBtn" class="btn btn-primary btn-block">📷 Mulai Scan</button>
+          <input type="file" id="scanPhotoInput" accept="image/*" capture="environment" hidden>
+          <button type="button" id="scanPhotoBtn" class="btn btn-outline btn-block">🖼 Scan dari Foto</button>
+        </div>
+
+        <div id="scanResultCard" class="card card-success hidden">
+          <div class="card-label">Hasil terakhir</div>
+          <div id="scanResultCode" class="scan-result-code"></div>
+          <button type="button" id="scanCopyBtn" class="btn btn-outline btn-block">📋 Salin Kode</button>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Riwayat scan</div>
+          <ul id="scanHistoryList" class="scan-history">
+            <li class="scan-history-empty">Belum ada scan</li>
+          </ul>
+          <button type="button" id="scanClearHistoryBtn" class="btn btn-ghost btn-block hidden">Hapus riwayat</button>
+        </div>
+      </section>
+
       <!-- TAB: HELP -->
       <section id="tab-help" class="tab-panel">
         <div class="section-title">Panduan</div>
         <div class="card">
           <ol class="steps-list">
+            <li>Tab <strong>Scan</strong> — baca barcode pakai kamera HP (HTTPS wajib)</li>
+            <li>Kamera gagal? Pakai <strong>Scan dari Foto</strong></li>
             <li>Tab <strong>Label</strong> — atur kode, footer, logo</li>
             <li>Tab <strong>Upload</strong> — pilih Excel produk</li>
             <li>Tap <strong>Generate Barcode</strong></li>
@@ -188,9 +218,13 @@
         <span class="nav-icon">📤</span>
         <span>Upload</span>
       </button>
+      <button type="button" class="nav-item" data-tab="tab-scan">
+        <span class="nav-icon">📷</span>
+        <span>Scan</span>
+      </button>
       <button type="button" class="nav-item" data-tab="tab-help">
         <span class="nav-icon">❓</span>
-        <span>Panduan</span>
+        <span>Help</span>
       </button>
     </nav>
 
@@ -208,6 +242,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

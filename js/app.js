@@ -1,4 +1,4 @@
-/* global XLSX, JsBarcode, JSZip, saveAs */
+/* global XLSX, JsBarcode, JSZip, saveAs, ZXing */
 
 (function () {
   "use strict";
@@ -15,7 +15,7 @@
     LABEL_HEIGHT_MM: 32,
     DEFAULT_MARGIN_TOP_MM: 9,
     DEFAULT_MARGIN_LEFT_MM: 3,
-    DEFAULT_HORIZONTAL_PITCH_MM: 67,
+    DEFAULT_HORIZONTAL_PITCH_MM: 65.2,
     DEFAULT_VERTICAL_PITCH_MM: 38,
     FOOTER_HEIGHT_MM: 7.5,
     FOOTER_FONT_MM: 2,
@@ -630,20 +630,48 @@
   const logoInput = document.getElementById("logoInput");
   const logoBrowseBtn = document.getElementById("logoBrowseBtn");
   const logoClearBtn = document.getElementById("logoClearBtn");
+  const appMain = document.querySelector(".app-main");
+  const bottomBar = document.querySelector(".bottom-bar");
+  const scanToggleBtn = document.getElementById("scanToggleBtn");
+  const scanStatus = document.getElementById("scanStatus");
+  const scanPhotoBtn = document.getElementById("scanPhotoBtn");
+  const scanPhotoInput = document.getElementById("scanPhotoInput");
+  const scanResultCard = document.getElementById("scanResultCard");
+  const scanResultCode = document.getElementById("scanResultCode");
+  const scanCopyBtn = document.getElementById("scanCopyBtn");
+  const scanHistoryList = document.getElementById("scanHistoryList");
+  const scanClearHistoryBtn = document.getElementById("scanClearHistoryBtn");
 
   let selectedFile = null;
   let downloadUrl = null;
   let logoImage = null;
   let logoObjectUrl = null;
   let labelPreviewObjectUrl = null;
+  let isScanning = false;
+  let scanHistoryItems = [];
+  let lastScanCode = "";
+  let lastScanTime = 0;
+  let scanStream = null;
+  let scanVideo = null;
+  let scanLoopId = null;
+  let zxingReader = null;
+  let scanEngine = null;
 
   function switchTab(tabId) {
+    if (isScanning && tabId !== "tab-scan") {
+      stopScanner();
+    }
+
     tabPanels.forEach(function (panel) {
       panel.classList.toggle("active", panel.id === tabId);
     });
     navItems.forEach(function (item) {
       item.classList.toggle("active", item.getAttribute("data-tab") === tabId);
     });
+
+    const hideGenerateBar = tabId === "tab-scan" || tabId === "tab-help";
+    bottomBar.classList.toggle("hidden", hideGenerateBar);
+    appMain.classList.toggle("no-bottom-bar", hideGenerateBar);
   }
 
   navItems.forEach(function (item) {
@@ -837,4 +865,311 @@
       setLoading(false);
     }
   });
+
+  function renderScanHistory() {
+    scanHistoryList.innerHTML = "";
+
+    if (scanHistoryItems.length === 0) {
+      const emptyItem = document.createElement("li");
+      emptyItem.className = "scan-history-empty";
+      emptyItem.textContent = "Belum ada scan";
+      scanHistoryList.appendChild(emptyItem);
+      scanClearHistoryBtn.classList.add("hidden");
+      return;
+    }
+
+    scanClearHistoryBtn.classList.remove("hidden");
+    scanHistoryItems.forEach(function (code) {
+      const item = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = code;
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Salin";
+      copyBtn.addEventListener("click", function () {
+        copyScanCode(code);
+      });
+      item.appendChild(label);
+      item.appendChild(copyBtn);
+      scanHistoryList.appendChild(item);
+    });
+  }
+
+  function copyScanCode(code) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(function () {
+        showToast("Kode disalin: " + code, false);
+      }).catch(function () {
+        showToast("Gagal salin kode.", true);
+      });
+      return;
+    }
+
+    showToast("Salin manual: " + code, false);
+  }
+
+  function handleScanSuccess(decodedText) {
+    const code = String(decodedText).trim().toUpperCase();
+    if (!code) return;
+
+    const now = Date.now();
+    if (code === lastScanCode && now - lastScanTime < 2000) return;
+
+    lastScanCode = code;
+    lastScanTime = now;
+    scanResultCode.textContent = code;
+    scanResultCard.classList.remove("hidden");
+
+    if (scanHistoryItems[0] !== code) {
+      scanHistoryItems.unshift(code);
+      if (scanHistoryItems.length > 30) scanHistoryItems.pop();
+      renderScanHistory();
+    }
+
+    if (navigator.vibrate) navigator.vibrate(80);
+    showToast("Terbaca: " + code, false);
+  }
+
+  function setScanButtonState(active) {
+    if (active) {
+      scanToggleBtn.textContent = "⏹ Stop Scan";
+      scanToggleBtn.classList.remove("btn-primary");
+      scanToggleBtn.classList.add("btn-danger");
+      scanStatus.textContent = "Arahkan ke barcode Code128...";
+      return;
+    }
+
+    scanToggleBtn.textContent = "📷 Mulai Scan";
+    scanToggleBtn.classList.remove("btn-danger");
+    scanToggleBtn.classList.add("btn-primary");
+    scanStatus.textContent = "Tap Mulai Scan untuk buka kamera";
+  }
+
+  function clearScanViewport() {
+    scanViewport.innerHTML = "";
+  }
+
+  function stopScanStream() {
+    if (scanLoopId) {
+      clearInterval(scanLoopId);
+      scanLoopId = null;
+    }
+
+    if (scanStream) {
+      scanStream.getTracks().forEach(function (track) {
+        track.stop();
+      });
+      scanStream = null;
+    }
+
+    scanVideo = null;
+  }
+
+  function stopZxingReader() {
+    if (zxingReader) {
+      try {
+        zxingReader.reset();
+      } catch (error) {
+        // ignore
+      }
+      zxingReader = null;
+    }
+  }
+
+  async function startNativeScanner() {
+    if (!("BarcodeDetector" in window)) {
+      throw new Error("BarcodeDetector tidak tersedia");
+    }
+
+    scanEngine = "detector";
+    clearScanViewport();
+
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+
+    scanVideo = document.createElement("video");
+    scanVideo.setAttribute("playsinline", "true");
+    scanVideo.setAttribute("webkit-playsinline", "true");
+    scanVideo.muted = true;
+    scanVideo.autoplay = true;
+    scanVideo.srcObject = scanStream;
+    scanViewport.appendChild(scanVideo);
+    await scanVideo.play();
+
+    const detector = new BarcodeDetector({ formats: ["code_128"] });
+    isScanning = true;
+    setScanButtonState(true);
+
+    scanLoopId = setInterval(function () {
+      if (!isScanning || !scanVideo) return;
+      detector
+        .detect(scanVideo)
+        .then(function (codes) {
+          if (codes && codes.length > 0) {
+            handleScanSuccess(codes[0].rawValue);
+          }
+        })
+        .catch(function () {});
+    }, 250);
+  }
+
+  function startZxingScanner() {
+    return new Promise(function (resolve, reject) {
+      if (typeof ZXing === "undefined" || !ZXing.BrowserMultiFormatReader) {
+        reject(new Error("Library ZXing tidak termuat"));
+        return;
+      }
+
+      scanEngine = "zxing";
+      clearScanViewport();
+      stopZxingReader();
+
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 500);
+
+      zxingReader
+        .decodeFromVideoDevice(null, scanViewport, function (result, error) {
+          if (result) {
+            handleScanSuccess(result.getText());
+          }
+          if (error && !(error instanceof ZXing.NotFoundException)) {
+            // ignore frame errors
+          }
+        })
+        .then(function () {
+          isScanning = true;
+          setScanButtonState(true);
+          const video = scanViewport.querySelector("video");
+          if (video) {
+            video.setAttribute("playsinline", "true");
+            video.setAttribute("webkit-playsinline", "true");
+            video.muted = true;
+          }
+          resolve();
+        })
+        .catch(reject);
+    });
+  }
+
+  async function startScanner() {
+    if (isScanning) return;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast("Browser tidak support kamera. Pakai Scan dari Foto.", true);
+      return;
+    }
+
+    scanStatus.textContent = "Membuka kamera...";
+
+    try {
+      if ("BarcodeDetector" in window) {
+        await startNativeScanner();
+        return;
+      }
+    } catch (error) {
+      stopScanStream();
+      clearScanViewport();
+    }
+
+    try {
+      await startZxingScanner();
+    } catch (error) {
+      stopScanner();
+      showToast(
+        "Gagal buka kamera. Izinkan akses kamera, atau pakai Scan dari Foto.",
+        true
+      );
+    }
+  }
+
+  async function stopScanner() {
+    if (!isScanning) return;
+
+    stopScanStream();
+    stopZxingReader();
+    clearScanViewport();
+
+    isScanning = false;
+    scanEngine = null;
+    setScanButtonState(false);
+  }
+
+  function decodeScanFromImage(file) {
+    if (!file) return;
+
+    if (typeof ZXing === "undefined" || !ZXing.BrowserMultiFormatReader) {
+      showToast("Library scanner belum termuat.", true);
+      return;
+    }
+
+    scanStatus.textContent = "Membaca foto...";
+    const reader = new ZXing.BrowserMultiFormatReader();
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = function () {
+      reader
+        .decodeFromImageElement(img)
+        .then(function (result) {
+          handleScanSuccess(result.getText());
+          scanStatus.textContent = isScanning
+            ? "Arahkan ke barcode Code128..."
+            : "Tap Mulai Scan untuk buka kamera";
+        })
+        .catch(function () {
+          showToast("Barcode tidak terbaca di foto. Coba foto lebih dekat & fokus.", true);
+          scanStatus.textContent = isScanning
+            ? "Arahkan ke barcode Code128..."
+            : "Tap Mulai Scan untuk buka kamera";
+        })
+        .finally(function () {
+          URL.revokeObjectURL(url);
+          reader.reset();
+        });
+    };
+
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      showToast("Foto tidak bisa dibaca.", true);
+    };
+
+    img.src = url;
+  }
+
+  scanToggleBtn.addEventListener("click", function () {
+    if (isScanning) stopScanner();
+    else startScanner();
+  });
+
+  scanPhotoBtn.addEventListener("click", function () {
+    scanPhotoInput.click();
+  });
+
+  scanPhotoInput.addEventListener("change", function (event) {
+    decodeScanFromImage(event.target.files[0] || null);
+    scanPhotoInput.value = "";
+  });
+
+  scanCopyBtn.addEventListener("click", function () {
+    copyScanCode(scanResultCode.textContent || "");
+  });
+
+  scanClearHistoryBtn.addEventListener("click", function () {
+    scanHistoryItems = [];
+    lastScanCode = "";
+    lastScanTime = 0;
+    renderScanHistory();
+    showToast("Riwayat scan dihapus.", false);
+  });
+
+  renderScanHistory();
 })();
